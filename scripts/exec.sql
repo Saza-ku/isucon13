@@ -10,4 +10,5 @@ RENAME USER 'isucon'@'localhost' to 'isucon'@'%';
 RENAME USER 'isudns'@'localhost' to 'isudns'@'%';
 */
 
-ALTER TABLE users ADD icon_path VARCHAR(255) NOT NULL DEFAULT '../img/NoImage.jpg';
+ALTER TABLE icons ADD icon_path VARCHAR(255) NOT NULL DEFAULT '../img/NoImage.jpg';
+-- ALTER TABLE icons DROP icon_path;

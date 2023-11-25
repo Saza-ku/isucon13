@@ -142,7 +142,7 @@ func postIconHandler(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	err = saveImage(req.Image, userID)
+	iconPath, err := saveImage(req.Image, userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save image: "+err.Error())
 	}
@@ -151,7 +151,8 @@ func postIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old user icon: "+err.Error())
 	}
 
-	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, image) VALUES (?, ?)", userID, req.Image)
+	// TODO: imageは削除
+	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, icon_path, image) VALUES (?, ?, ?)", userID, iconPath, req.Image)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert new user icon: "+err.Error())
 	}
@@ -170,16 +171,13 @@ func postIconHandler(c echo.Context) error {
 	})
 }
 
-func saveImage(image []byte, userID int64) error {
+func saveImage(image []byte, userID int64) (string, error) {
 	iconPath := fmt.Sprintf("%s/%d.jpeg", iconDirPath, userID)
 	err := os.WriteFile(iconPath, image, 0644)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if _, err = dbConn.Exec("UPDATE users SET icon_path = ? WHERE id = ?", image, userID); err != nil {
-		return err
-	}
-	return nil
+	return iconPath, nil
 }
 
 func getMeHandler(c echo.Context) error {
