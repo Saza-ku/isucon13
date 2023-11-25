@@ -434,16 +434,18 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		return User{}, err
 	}
 
-	var iconHashStr string
-	stat, err := os.Stat(iconPath)
-	if err != nil {
-		iconHash := sha256.Sum256(image)
-		iconHashStr = fmt.Sprintf("%x", iconHash)
-	} else {
-		modTime := stat.ModTime().Unix()
-		length := len(image)
-		iconHashStr = fmt.Sprintf("\"%x-%x\"", modTime, length)
-	}
+	// var iconHashStr string
+	// stat, err := os.Stat(iconPath)
+	// if err != nil {
+	// 	iconHash := sha256.Sum256(image)
+	// 	iconHashStr = fmt.Sprintf("%x", iconHash)
+	// } else {
+	// 	modTime := stat.ModTime().Unix()
+	// 	length := len(image)
+	// 	iconHashStr = fmt.Sprintf("\"%x-%x\"", modTime, length)
+	// }
+	iconHash := sha256.Sum256(image)
+	iconHashStr := fmt.Sprintf("%x", iconHash)
 	user := User{
 		ID:          userModel.ID,
 		Name:        userModel.Name,
