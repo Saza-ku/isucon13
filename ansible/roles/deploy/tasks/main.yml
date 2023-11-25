@@ -7,6 +7,13 @@
     mode: push
     delete: false
 
+- name: Deploy powerdns config
+  ansible.posix.synchronize:
+    src: ../../../../etc/powerdns
+    dest: /etc/powerdns
+    mode: push
+    delete: false
+
 - name: Deploy mysql config
   ansible.posix.synchronize:
     src: ../../../../etc/mysql/
@@ -90,6 +97,14 @@
     group: isucon
     recurse: yes
 
+- name: Fix owner of powerdns config
+  become: true
+  file:
+    path: /etc/powerdns
+    owner: root
+    group: root
+    recurse: yes
+
 - name: Fix owner of mysql config
   become: true
   file:
@@ -140,6 +155,13 @@
   become: true
   systemd:
     name: "{{ app_service_name }}"
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart powerdns
+  become: true
+  systemd:
+    name: pdns.service
     state: restarted
     daemon_reload: yes
 
