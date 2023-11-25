@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-sql-driver/mysql"
@@ -38,10 +39,10 @@ var (
 )
 
 type IconModel struct {
-	ID             int64  `db:"id"`
-	UserID         int64  `db:"user_id"`
-	IconPath       string `db:"icon_path"`
-	Image          []byte `db:"image"`
+	ID       int64  `db:"id"`
+	UserID   int64  `db:"user_id"`
+	IconPath string `db:"icon_path"`
+	Image    []byte `db:"image"`
 }
 
 func init() {
@@ -108,6 +109,14 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 	db, err := sqlx.Open("mysql", conf.FormatDSN())
 	if err != nil {
 		return nil, err
+	}
+	// wait for mysql
+	for {
+		err := db.Ping()
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second * 2)
 	}
 	db.SetMaxOpenConns(10)
 
