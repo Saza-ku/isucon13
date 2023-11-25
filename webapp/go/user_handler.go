@@ -106,8 +106,8 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user: "+err.Error())
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", user.ID); err != nil {
+	var iconPath string
+	if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", user.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.File(fallbackImage)
 		} else {
@@ -115,7 +115,7 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 		}
 	}
 
-	return c.Blob(http.StatusOK, "image/jpeg", image)
+	return c.File(iconPath)
 }
 
 func postIconHandler(c echo.Context) error {
@@ -151,8 +151,7 @@ func postIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old user icon: "+err.Error())
 	}
 
-	// TODO: imageは削除
-	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, icon_path, image) VALUES (?, ?, ?)", userID, iconPath, req.Image)
+	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, icon_path, image) VALUES (?, ?, ?)", userID, iconPath, []byte{})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert new user icon: "+err.Error())
 	}
@@ -422,14 +421,16 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 	}
 
 	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", userModel.ID); err != nil {
+	var iconPath string
+	if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", userModel.ID); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return User{}, err
 		}
-		image, err = os.ReadFile(fallbackImage)
-		if err != nil {
-			return User{}, err
-		}
+		iconPath = fallbackImage
+	}
+	image, err := os.ReadFile(iconPath)
+	if err != nil {
+		return User{}, err
 	}
 	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
 

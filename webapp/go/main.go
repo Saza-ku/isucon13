@@ -163,9 +163,10 @@ func initializeUserIconPath() error {
 		if err != nil {
 			return err
 		}
+		icon.Image = []byte{}
 	}
 
-	if _, err := dbConn.NamedExec("INSERT INTO icons (id, user_id, icon_path) VALUES (:id, :user_id, :icon_path) ON DUPLICATE KEY UPDATE icon_path = VALUES(`icon_path`)", icons); err != nil {
+	if _, err := dbConn.NamedExec("INSERT INTO icons (id, user_id, icon_path, image) VALUES (:id, :user_id, :icon_path, :image) ON DUPLICATE KEY UPDATE icon_path = VALUES(`icon_path`)", icons); err != nil {
 		return err
 	}
 	return nil
