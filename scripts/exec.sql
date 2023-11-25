@@ -16,4 +16,6 @@ RENAME USER 'isudns'@'localhost' to 'isudns'@'%';
 -- ALTER TABLE icons ADD icon_path VARCHAR(255) NOT NULL DEFAULT '../img/NoImage.jpg';
 -- ALTER TABLE icons DROP icon_path;
 
-ALTER TABLE `ng_words` ADD INDEX `ng_words_user_livestream_index` (`user_id`,`livestream_id`);
+-- ALTER TABLE `ng_words` ADD INDEX `ng_words_user_livestream_index` (`user_id`,`livestream_id`);
+
+ALTER TABLE `livecomments` ADD INDEX `livestream_id_created_idx` (`livestream_id`, `created_at`);
