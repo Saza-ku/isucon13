@@ -85,7 +85,7 @@ type PostIconResponse struct {
 	ID int64 `json:"id"`
 }
 
-func getIconHandler(c echo.Context) error {
+func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で返す(アプリマニュアル参照)
 	ctx := c.Request().Context()
 
 	username := c.Param("username")
@@ -414,7 +414,7 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			return User{}, err
 		}
 	}
-	iconHash := sha256.Sum256(image)
+	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
 
 	user := User{
 		ID:          userModel.ID,
