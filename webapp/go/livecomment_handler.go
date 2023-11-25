@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -102,14 +103,9 @@ func getLivecommentsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
 	}
 
-	livecomments := make([]Livecomment, len(livecommentModels))
-	for i := range livecommentModels {
-		livecomment, err := fillLivecommentResponse(ctx, tx, livecommentModels[i]) // N+1
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fil livecomments: "+err.Error())
-		}
-
-		livecomments[i] = livecomment
+	livecomments, err := getLivecommentsResponse(ctx, tx, livecommentModels, int64(livestreamID))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -202,21 +198,8 @@ func postLivecommentHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get NG words: "+err.Error())
 	}
 
-	var hitSpam int
 	for _, ngword := range ngwords {
-		query := `
-		SELECT COUNT(*)
-		FROM
-		(SELECT ? AS text) AS texts
-		INNER JOIN
-		(SELECT CONCAT('%', ?, '%')	AS pattern) AS patterns
-		ON texts.text LIKE patterns.pattern;
-		`
-		if err := tx.GetContext(ctx, &hitSpam, query, req.Comment, ngword.Word); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to get hitspam: "+err.Error())
-		}
-		c.Logger().Infof("[hitSpam=%d] comment = %s", hitSpam, req.Comment)
-		if hitSpam >= 1 {
+		if strings.Contains(req.Comment, ngword.Word){
 			return echo.NewHTTPError(http.StatusBadRequest, "このコメントがスパム判定されました")
 		}
 	}
@@ -382,35 +365,27 @@ func moderateHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get last inserted NG word id: "+err.Error())
 	}
 
-	var ngwords []*NGWord
-	if err := tx.SelectContext(ctx, &ngwords, "SELECT * FROM ng_words WHERE livestream_id = ?", livestreamID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get NG words: "+err.Error())
-	}
-
 	// NGワードにヒットする過去の投稿も全削除する
-	for _, ngword := range ngwords {
-		// ライブコメント一覧取得
-		var livecomments []*LivecommentModel
-		if err := tx.SelectContext(ctx, &livecomments, "SELECT * FROM livecomments"); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
+	// ライブコメント一覧取得
+	var livecomments []*LivecommentModel
+	if err := tx.SelectContext(ctx, &livecomments, "SELECT * FROM livecomments"); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
+	}
+	var deleteIds []int64
+	for _, livecomment := range livecomments {
+		if strings.Contains(livecomment.Comment, req.NGWord) {
+			deleteIds = append(deleteIds, livecomment.ID)
 		}
-
-		for _, livecomment := range livecomments {
-			query := `
-			DELETE FROM livecomments
-			WHERE
-			id = ? AND
-			livestream_id = ? AND
-			(SELECT COUNT(*)
-			FROM
-			(SELECT ? AS text) AS texts
-			INNER JOIN
-			(SELECT CONCAT('%', ?, '%')	AS pattern) AS patterns
-			ON texts.text LIKE patterns.pattern) >= 1;
-			`
-			if _, err := tx.ExecContext(ctx, query, livecomment.ID, livestreamID, livecomment.Comment, ngword.Word); err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old livecomments that hit spams: "+err.Error())
-			}
+	}
+	if len(deleteIds) > 0 {
+		query, args, err := sqlx.In("DELETE FROM livecomments WHERE id IN (?)", deleteIds)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "sql parse error:"+err.Error())
+		}
+		query = tx.Rebind(query)
+		_, err = tx.Exec(query, args...)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old livecomments that hit spams: "+err.Error())
 		}
 	}
 
@@ -423,6 +398,47 @@ func moderateHandler(c echo.Context) error {
 	})
 }
 
+func getLivecommentsResponse(ctx context.Context, tx *sqlx.Tx, livecommentModels []LivecommentModel, livestreamId int64) ([]Livecomment, error){
+	userMap := map[int64]User{}
+	for _, livecommentModel := range livecommentModels {
+		userMap[livecommentModel.UserID] = User{}
+	}
+	userIDs := make([]int64, len(userMap))
+	for userID := range userMap {
+		userIDs = append(userIDs, userID)
+	}
+	users, err := getUsersResponse(ctx, tx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+	
+	var livestreamModel LivestreamModel
+	if err := tx.GetContext(ctx, &livestreamModel, "SELECT * FROM livestreams WHERE id = ?", livestreamId); err != nil {
+		return nil, err
+	}
+	livestream, err := fillLivestreamResponse(ctx, tx, livestreamModel)
+	if err != nil {
+		return nil, err
+	}
+
+	livecomments := make([]Livecomment, len(livecommentModels))
+	for i, livecommentModel := range livecommentModels {
+		livecomments[i] = Livecomment{
+			ID:         livecommentModel.ID,
+			User:       userMap[livecommentModel.UserID],
+			Livestream: livestream,
+			Comment:    livecommentModel.Comment,
+			Tip:        livecommentModel.Tip,
+			CreatedAt:  livecommentModel.CreatedAt,
+		}
+	}
+	return livecomments, nil
+}
+
+// MORIRIN: 遅いが、ボトルネックではなさそう
 func fillLivecommentResponse(ctx context.Context, tx *sqlx.Tx, livecommentModel LivecommentModel) (Livecomment, error) {
 	commentOwnerModel := UserModel{}
 	if err := tx.GetContext(ctx, &commentOwnerModel, "SELECT * FROM users WHERE id = ?", livecommentModel.UserID); err != nil {

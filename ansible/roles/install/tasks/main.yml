@@ -27,7 +27,7 @@
   apt:
     name: netdata
 
-# - name: Install memcached
-#   become: true
-#   apt:
-#     name: memcached
+- name: Install memcached
+  become: true
+  apt:
+    name: memcached

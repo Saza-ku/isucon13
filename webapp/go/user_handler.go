@@ -18,6 +18,8 @@ import (
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
+	"github.com/bradfitz/gomemcache/memcache"
+
 )
 
 const (
@@ -36,6 +38,7 @@ type UserModel struct {
 	DisplayName    string `db:"display_name"`
 	Description    string `db:"description"`
 	HashedPassword string `db:"password"`
+	IconPath       string `db:"icon_path"`
 }
 
 type User struct {
@@ -45,6 +48,7 @@ type User struct {
 	Description string `json:"description,omitempty"`
 	Theme       Theme  `json:"theme,omitempty"`
 	IconHash    string `json:"icon_hash,omitempty"`
+	IconPath    string `json:"icon_path,omitempty"`
 }
 
 type Theme struct {
@@ -90,6 +94,17 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 
 	username := c.Param("username")
 
+	expectIconHash := c.Request().Header.Get("If-None-Match")
+	if expectIconHash != "" {
+		actualItem, err := mcConn.Get(iconHashKey(username))
+		if err == nil {
+			actualIconHash := fmt.Sprintf("\"%s\"", string(actualItem.Value))
+			if expectIconHash == actualIconHash {
+				return c.NoContent(http.StatusNotModified)
+			}
+		}
+	}
+
 	tx, err := dbConn.BeginTxx(ctx, nil)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin transaction: "+err.Error())
@@ -104,8 +119,8 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user: "+err.Error())
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", user.ID); err != nil {
+	var iconPath string
+	if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", user.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.File(fallbackImage)
 		} else {
@@ -113,7 +128,7 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 		}
 	}
 
-	return c.Blob(http.StatusOK, "image/jpeg", image)
+	return c.File(iconPath)
 }
 
 func postIconHandler(c echo.Context) error {
@@ -140,11 +155,23 @@ func postIconHandler(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
+	iconPath, err := saveImage(req.Image, userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save image: "+err.Error())
+	}
+
+	username := sess.Values[defaultUsernameKey].(string)
+	if err := mcConn.Delete(iconHashKey(username)); err != nil {
+		if err != memcache.ErrCacheMiss {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete mc: "+err.Error())
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx, "DELETE FROM icons WHERE user_id = ?", userID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old user icon: "+err.Error())
 	}
 
-	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, image) VALUES (?, ?)", userID, req.Image)
+	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, icon_path, image) VALUES (?, ?, ?)", userID, iconPath, []byte{})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert new user icon: "+err.Error())
 	}
@@ -161,6 +188,15 @@ func postIconHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, &PostIconResponse{
 		ID: iconID,
 	})
+}
+
+func saveImage(image []byte, userID int64) (string, error) {
+	iconPath := fmt.Sprintf("%s/%d.jpeg", iconDirPath, userID)
+	err := os.WriteFile(iconPath, image, 0644)
+	if err != nil {
+		return "", err
+	}
+	return iconPath, nil
 }
 
 func getMeHandler(c echo.Context) error {
@@ -398,23 +434,122 @@ func verifyUserSession(c echo.Context) error {
 	return nil
 }
 
+type IconPathData struct {
+	UserID   int64  `db:"user_id"`
+	IconPath string `db:"icon_path"`
+}
+
+func getUsersResponse(ctx context.Context, tx *sqlx.Tx, ids []int64) ([]User, error){
+	var users []UserModel
+	var res []User
+	if len(ids) == 0 {
+		return res, nil
+	}
+
+	query, args, err := sqlx.In("SELECT * FROM users WHERE id IN (?)", ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.SelectContext(ctx, &users, query, args...); err != nil {
+		return nil, err
+	}
+	userId2index := make(map[int64]int)
+	res = make([]User, len(users))
+	for i, user := range users {
+		userId2index[user.ID] = i
+		res[i] = User{
+			ID:          user.ID,
+			Name:        user.Name,
+			DisplayName: user.DisplayName,
+			Description: user.Description,
+		}
+	}
+
+	var themes []ThemeModel
+	query, args, err = sqlx.In("SELECT * FROM themes WHERE user_id IN (?)", ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.SelectContext(ctx, &themes, query, args...); err != nil {
+		return nil, err
+	}
+	for _, theme := range themes {
+		idx, ok := userId2index[theme.UserID]
+		if !ok {
+			continue
+		}
+		res[idx].Theme = Theme{
+			ID:       theme.ID,
+			DarkMode: theme.DarkMode,
+		}
+	}
+	if len(themes) != len(users) {
+		return nil, errors.New("the number of themes is not equal to the number of users")
+	}
+	
+	var icons []IconPathData
+	query, args, err = sqlx.In("SELECT user_id, icon_path FROM icons WHERE user_id IN (?)", ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.SelectContext(ctx, &icons, query, args...); err != nil {
+		return nil, err
+	}
+	for _, icon := range icons {
+		idx, ok := userId2index[icon.UserID]
+		if !ok {
+			continue
+		}
+		res[idx].IconPath = icon.IconPath
+	}
+	for i, user := range res {
+		if user.IconPath == "" {
+			res[i].IconPath = fallbackImage
+		}
+	}
+	for i, user := range res {
+		image, err := os.ReadFile(user.IconPath)
+		if err != nil {
+			return nil, err
+		}
+		res[i].IconHash = fmt.Sprintf("%x", sha256.Sum256(image))
+	}
+
+	return res, nil
+}
+
 func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (User, error) {
 	themeModel := ThemeModel{}
 	if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
 		return User{}, err
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", userModel.ID); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return User{}, err
+	var iconHashStr string
+	item, err := mcConn.Get(iconHashKey(userModel.Name))
+	if err == nil {
+		iconHashStr = string(item.Value)
+	} else {
+		var image []byte
+		var iconPath string
+		if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", userModel.ID); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return User{}, err
+			}
+			iconPath = fallbackImage
 		}
-		image, err = os.ReadFile(fallbackImage)
+		image, err := os.ReadFile(iconPath)
 		if err != nil {
 			return User{}, err
 		}
+		iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
+		iconHashStr = fmt.Sprintf("%x", iconHash)
+
+		mcConn.Set(&memcache.Item{
+			Key:        iconHashKey(userModel.Name),
+			Value:      []byte(iconHashStr),
+			Expiration: 0,
+		})
 	}
-	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
 
 	user := User{
 		ID:          userModel.ID,
@@ -425,8 +560,12 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
 		},
-		IconHash: fmt.Sprintf("%x", iconHash),
+		IconHash: iconHashStr,
 	}
 
 	return user, nil
+}
+
+func iconHashKey(userName string) string {
+	return fmt.Sprintf("iconhash_%s", userName)
 }
