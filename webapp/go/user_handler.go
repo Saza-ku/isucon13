@@ -18,6 +18,8 @@ import (
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
+	"github.com/bradfitz/gomemcache/memcache"
+
 )
 
 const (
@@ -91,6 +93,16 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 	ctx := c.Request().Context()
 
 	username := c.Param("username")
+
+	expectIconHash := c.Request().Header.Get("If-None-Match")
+	if expectIconHash != "" {
+		actualIconHash, err := mcConn.Get(iconHashKey(username))
+		if err == nil {
+			if expectIconHash == string(actualIconHash.Value) {
+				return c.NoContent(http.StatusNotModified)
+			}
+		}
+	}
 
 	tx, err := dbConn.BeginTxx(ctx, nil)
 	if err != nil {
@@ -433,6 +445,13 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		return User{}, err
 	}
 	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
+	iconHashStr := fmt.Sprintf("%x", iconHash)
+
+	mcConn.Set(&memcache.Item{
+		Key:        iconHashKey(userModel.Name),
+		Value:      []byte(iconHashStr),
+		Expiration: 0,
+	})
 
 	user := User{
 		ID:          userModel.ID,
@@ -443,8 +462,12 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
 		},
-		IconHash: fmt.Sprintf("%x", iconHash),
+		IconHash: iconHashStr,
 	}
 
 	return user, nil
+}
+
+func iconHashKey(userName string) string {
+	return fmt.Sprintf("iconhash_%s", userName)
 }

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strconv"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
@@ -32,6 +33,7 @@ const (
 var (
 	powerDNSSubdomainAddress string
 	dbConn                   *sqlx.DB
+	mcConn                   *memcache.Client
 	secret                   = []byte("isucon13_session_cookiestore_defaultsecret")
 )
 
@@ -125,6 +127,12 @@ func initializeHandler(c echo.Context) error {
 	if err := initializeUserIconPath(); err != nil {
 		c.Logger().Warnf("failed to initialize user icon path: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
+	}
+
+	err := mcConn.FlushAll()
+	if err != nil {
+		c.Logger().Errorf("mc FlushAll error : %v", err)
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	go func() {
@@ -253,6 +261,8 @@ func main() {
 	}
 	defer conn.Close()
 	dbConn = conn
+
+	mcConn = memcache.New("isucon2:11211")
 
 	subdomainAddr, ok := os.LookupEnv(powerDNSSubdomainAddressEnvKey)
 	if !ok {
