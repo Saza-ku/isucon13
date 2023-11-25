@@ -1,9 +1,8 @@
 set -eux
 
-# TODO: settings
-MYSQL_USER=root
-MYSQL_PASS=root
-MYSQL_DBNAME=
+MYSQL_USER=isucon
+MYSQL_PASS=isucon
+MYSQL_DBNAME=isupipe
 
 cd `dirname $0`
 
