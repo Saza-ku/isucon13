@@ -26,6 +26,7 @@ import (
 const (
 	listenPort                     = 8080
 	powerDNSSubdomainAddressEnvKey = "ISUCON13_POWERDNS_SUBDOMAIN_ADDRESS" // ONOE: isucon2のglobal ip
+	iconDirPath                    = "/home/isucon/icons"
 )
 
 var (
@@ -114,6 +115,11 @@ func initializeHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
+	if err := initializeUserIconPath(); err != nil {
+		c.Logger().Warnf("failed to initialize user icon path: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
+	}
+
 	go func() {
 		http.Post(fmt.Sprintf("http://192.168.0.11:%d/setup", 8080), "application/json", nil)
 		http.Post(fmt.Sprintf("http://192.168.0.12:%d/setup", 8080), "application/json", nil)
@@ -124,6 +130,38 @@ func initializeHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, InitializeResponse{
 		Language: "golang",
 	})
+}
+
+func initializeUserIconPath() error {
+	type tmpUser struct {
+		ID             int64  `db:"id"`
+		IconPath       string `db:"icon_path"`
+		Image          []byte `db:"image"`
+	}
+	var users []*tmpUser
+	if err := dbConn.Select(&users, "SELECT users.id AS id, icons.image AS image, users.icon_path AS icon_path FROM users JOIN icons ON icons.user_id = users.id"); err != nil {
+		return err
+	}
+
+	for _, user := range users {
+		if user.IconPath != "" {
+			continue
+		}
+		if len(user.Image) == 0 {
+			user.IconPath = fallbackImage
+			continue
+		}
+		user.IconPath = fmt.Sprintf("%s/%d.jpeg", iconDirPath, user.ID)
+		err := os.WriteFile(user.IconPath, user.Image, 0644)
+		if err != nil {
+			return err
+		}
+	}
+
+	if _, err := dbConn.NamedExec("INSERT INTO users (id, icon_path) VALUES (:id, :icon_path) ON DUPLICATE KEY UPDATE icon_path = VALUES(`icon_path`)", users); err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {

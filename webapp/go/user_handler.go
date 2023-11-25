@@ -36,6 +36,7 @@ type UserModel struct {
 	DisplayName    string `db:"display_name"`
 	Description    string `db:"description"`
 	HashedPassword string `db:"password"`
+	IconPath       string `db:"icon_path"`
 }
 
 type User struct {
@@ -45,6 +46,7 @@ type User struct {
 	Description string `json:"description,omitempty"`
 	Theme       Theme  `json:"theme,omitempty"`
 	IconHash    string `json:"icon_hash,omitempty"`
+	IconPath    string `json:"icon_path,omitempty"`
 }
 
 type Theme struct {
@@ -140,6 +142,11 @@ func postIconHandler(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
+	err = saveImage(req.Image, userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save image: "+err.Error())
+	}
+
 	if _, err := tx.ExecContext(ctx, "DELETE FROM icons WHERE user_id = ?", userID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old user icon: "+err.Error())
 	}
@@ -161,6 +168,18 @@ func postIconHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, &PostIconResponse{
 		ID: iconID,
 	})
+}
+
+func saveImage(image []byte, userID int64) error {
+	iconPath := fmt.Sprintf("%s/%d.jpeg", iconDirPath, userID)
+	err := os.WriteFile(iconPath, image, 0644)
+	if err != nil {
+		return err
+	}
+	if _, err = dbConn.Exec("UPDATE users SET icon_path = ? WHERE id = ?", image, userID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func getMeHandler(c echo.Context) error {
