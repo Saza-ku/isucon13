@@ -7,6 +7,13 @@
     mode: push
     delete: false
 
+- name: Deploy powerdns config
+  ansible.posix.synchronize:
+    src: ../../../../etc/powerdns
+    dest: /etc/powerdns
+    mode: push
+    delete: false
+
 - name: Deploy mysql config
   ansible.posix.synchronize:
     src: ../../../../etc/mysql/
@@ -88,6 +95,14 @@
     path: /home/isucon/webapp
     owner: isucon
     group: isucon
+    recurse: yes
+
+- name: Fix owner of powerdns config
+  become: true
+  file:
+    path: /etc/powerdns
+    owner: root
+    group: root
     recurse: yes
 
 - name: Fix owner of mysql config
