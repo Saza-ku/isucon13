@@ -2,9 +2,12 @@
 
 ### /etc/hosts
 ```
- isucon1
- isucon2
- isucon3
+18.176.233.191 isucon1
+13.230.175.141 isucon2
+35.72.52.25 isucon3
+
+18.176.233.191 pipe.u.isucon.dev
+18.176.233.191 test001.u.isucon.dev
 ```
 
 ### SSH forwarding for netdata
