@@ -2,9 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/labstack/echo/v4"
 )
 
@@ -81,8 +84,20 @@ func getStreamerThemeHandler(c echo.Context) error {
 	}
 
 	themeModel := ThemeModel{}
-	if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user theme: "+err.Error())
+	if item, err := mcConn.Get(themeCacheKey(userModel.ID)); err == nil {
+		if err := json.Unmarshal(item.Value, &themeModel); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to unmarshal theme: "+err.Error())
+		}
+	} else {
+		if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user theme: "+err.Error())
+		}
+		value, _ := json.Marshal(themeModel)
+		_ = mcConn.Set(&memcache.Item{
+			Key:        themeCacheKey(userModel.ID),
+			Value:      value,
+			Expiration: 0,
+		})
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -95,4 +110,8 @@ func getStreamerThemeHandler(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, theme)
+}
+
+func themeCacheKey(userID int64) string {
+	return fmt.Sprintf("theme_%d", userID)
 }

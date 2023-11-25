@@ -292,6 +292,18 @@ func registerHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert user theme: "+err.Error())
 	}
 
+	value, err := json.Marshal(themeModel)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to marshal theme: "+err.Error())
+	}
+	if err := mcConn.Set(&memcache.Item{
+		Key:        themeCacheKey(userModel.ID),
+		Value:      value,
+		Expiration: 0,
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to set theme: "+err.Error())
+	}
+
 	if out, err := exec.Command("pdnsutil", "add-record", "u.isucon.dev", req.Name, "A", "0", powerDNSSubdomainAddress).CombinedOutput(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, string(out)+": "+err.Error())
 	}
@@ -473,6 +485,28 @@ func getUsersResponse(ctx context.Context, tx *sqlx.Tx, ids []int64) ([]User, er
 	if err := tx.SelectContext(ctx, &themes, query, args...); err != nil {
 		return nil, err
 	}
+	// mcKeys := make([]string, len(ids))
+	// for i, id := range ids {
+	// 	mcKeys[i] = themeCacheKey(id)
+	// }
+	// if items, err := mcConn.GetMulti(mcKeys); err == nil {
+	// 	for _, item := range items {
+	// 		theme := ThemeModel{}
+	// 		if err := json.Unmarshal(item.Value, &theme); err != nil {
+	// 			return nil, err
+	// 		}
+	// 		themes = append(themes, theme)
+	// 	}
+	// } else {
+	// 	query, args, err = sqlx.In("SELECT * FROM themes WHERE user_id IN (?)", ids)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	if err := tx.SelectContext(ctx, &themes, query, args...); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
+
 	for _, theme := range themes {
 		idx, ok := userId2index[theme.UserID]
 		if !ok {
@@ -538,8 +572,20 @@ func getUsersResponse(ctx context.Context, tx *sqlx.Tx, ids []int64) ([]User, er
 
 func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (User, error) {
 	themeModel := ThemeModel{}
-	if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
-		return User{}, err
+	if item, err := mcConn.Get(themeCacheKey(userModel.ID)); err == nil {
+		if err := json.Unmarshal(item.Value, &themeModel); err != nil {
+			return User{}, err
+		}
+	} else {
+		if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
+			return User{}, err
+		}
+		value, _ := json.Marshal(themeModel)
+		_ = mcConn.Set(&memcache.Item{
+			Key:        themeCacheKey(userModel.ID),
+			Value:      value,
+			Expiration: 0,
+		})
 	}
 
 	var iconHashStr string
