@@ -3,5 +3,19 @@ sort: "sum"
 reverse: true
 query_string: false
 output: "count,method,uri,min,max,sum,avg,p99"
-matching_groups: #TODO: settings
-  - /api/hoge/.+
+matching_groups:
+  - /api/user/.+/theme
+  - /api/user/.+/livestream
+  - /api/livestream/.+/statistics
+  - /api/user/.+/icon
+  - /api/user/.+/statistics
+  - /api/user/.+
+  - /api/livestream/.+/exit
+  - /api/livestream/.+/enter
+  - /api/livestream/.+/moderate
+  - /api/livestream/.+/livecomment/.+/report
+  - /api/livestream/.+/ngwords
+  - /api/livestream/.+/report
+  - /api/livestream/.+/reaction
+  - /api/livestream/.+/livecomment
+  - /api/livestream/.+

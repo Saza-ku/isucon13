@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"strconv"
@@ -65,6 +66,7 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 	conf.Passwd = "isucon"
 	conf.DBName = "isupipe"
 	conf.ParseTime = true
+	conf.InterpolateParams = true
 
 	if v, ok := os.LookupEnv(networkTypeEnvKey); ok {
 		conf.Net = v
@@ -112,6 +114,12 @@ func initializeHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
+	go func() {
+		http.Post(fmt.Sprintf("http://192.168.0.11:%d/setup", 8080), "application/json", nil)
+		http.Post(fmt.Sprintf("http://192.168.0.12:%d/setup", 8080), "application/json", nil)
+		http.Post(fmt.Sprintf("http://192.168.0.13:%d/setup", 8080), "application/json", nil)
+	}()
+
 	c.Request().Header.Add("Content-Type", "application/json;charset=utf-8")
 	return c.JSON(http.StatusOK, InitializeResponse{
 		Language: "golang",
@@ -119,6 +127,11 @@ func initializeHandler(c echo.Context) error {
 }
 
 func main() {
+	// pprof
+	go func() {
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
+
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(echolog.DEBUG)
@@ -127,6 +140,8 @@ func main() {
 	cookieStore.Options.Domain = "*.u.isucon.dev"
 	e.Use(session.Middleware(cookieStore))
 	// e.Use(middleware.Recover())
+
+	e.POST("/setup", postSetup)
 
 	// 初期化
 	e.POST("/api/initialize", initializeHandler)
@@ -224,4 +239,18 @@ func errorResponseHandler(err error, c echo.Context) {
 	if e := c.JSON(http.StatusInternalServerError, &ErrorResponse{Error: err.Error()}); e != nil {
 		c.Logger().Errorf("%+v", e)
 	}
+}
+
+func postSetup(c echo.Context) error {
+	go func() {
+		cmd := exec.Command("/home/isucon/scripts/measure.sh")
+		bytes, err := cmd.Output()
+		cmd.Stderr = os.Stderr
+		if err != nil {
+			c.Logger().Errorf("exec measure.sh error: %v", err)
+			c.Logger().Errorf("output: %v", string(bytes))
+		}
+	}()
+
+	return c.NoContent(http.StatusOK)
 }
