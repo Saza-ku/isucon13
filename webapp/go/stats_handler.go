@@ -93,7 +93,7 @@ func getUserStatisticsHandler(c echo.Context) error {
 	}
 
 	var ranking UserRanking
-	for _, user := range users {
+	for _, user := range users { // ONOE: N+1 いい感じにcacheしたい
 		var reactions int64
 		query := `
 		SELECT COUNT(*) FROM users u

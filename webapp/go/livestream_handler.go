@@ -148,7 +148,7 @@ func reserveLivestreamHandler(c echo.Context) error {
 	}
 	livestreamModel.ID = livestreamID
 
-	// タグ追加
+	// タグ追加 // ONOE: N+1
 	for _, tagID := range req.Tags {
 		if _, err := tx.NamedExecContext(ctx, "INSERT INTO livestream_tags (livestream_id, tag_id) VALUES (:livestream_id, :tag_id)", &LivestreamTagModel{
 			LivestreamID: livestreamID,
@@ -158,6 +158,7 @@ func reserveLivestreamHandler(c echo.Context) error {
 		}
 	}
 
+	// ONOE: クエリまとめたい
 	livestream, err := fillLivestreamResponse(ctx, tx, *livestreamModel)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill livestream: "+err.Error())
@@ -222,7 +223,7 @@ func searchLivestreamsHandler(c echo.Context) error {
 	}
 
 	livestreams := make([]Livestream, len(livestreamModels))
-	for i := range livestreamModels {
+	for i := range livestreamModels { // ONOE: N+1
 		livestream, err := fillLivestreamResponse(ctx, tx, *livestreamModels[i])
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill livestream: "+err.Error())

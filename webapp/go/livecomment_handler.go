@@ -84,8 +84,8 @@ func getLivecommentsHandler(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	query := "SELECT * FROM livecomments WHERE livestream_id = ? ORDER BY created_at DESC"
-	if c.QueryParam("limit") != "" {
+	query := "SELECT * FROM livecomments WHERE livestream_id = ? ORDER BY created_at DESC" // ONOE: id,created_at index
+	if c.QueryParam("limit") != "" { // ONOE: limit
 		limit, err := strconv.Atoi(c.QueryParam("limit"))
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "limit query parameter must be integer")
@@ -104,7 +104,7 @@ func getLivecommentsHandler(c echo.Context) error {
 
 	livecomments := make([]Livecomment, len(livecommentModels))
 	for i := range livecommentModels {
-		livecomment, err := fillLivecommentResponse(ctx, tx, livecommentModels[i])
+		livecomment, err := fillLivecommentResponse(ctx, tx, livecommentModels[i]) // N+1
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fil livecomments: "+err.Error())
 		}
@@ -196,7 +196,7 @@ func postLivecommentHandler(c echo.Context) error {
 		}
 	}
 
-	// スパム判定
+	// スパム判定 // ONOE: postCommentの時にも弾いた方が良さそう
 	var ngwords []*NGWord
 	if err := tx.SelectContext(ctx, &ngwords, "SELECT id, user_id, livestream_id, word FROM ng_words WHERE user_id = ? AND livestream_id = ?", livestreamModel.UserID, livestreamModel.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get NG words: "+err.Error())
@@ -230,6 +230,7 @@ func postLivecommentHandler(c echo.Context) error {
 		CreatedAt:    now,
 	}
 
+	// ONOE: Bulkで良さそう
 	rs, err := tx.NamedExecContext(ctx, "INSERT INTO livecomments (user_id, livestream_id, comment, tip, created_at) VALUES (:user_id, :livestream_id, :comment, :tip, :created_at)", livecommentModel)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert livecomment: "+err.Error())

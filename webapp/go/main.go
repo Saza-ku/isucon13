@@ -24,7 +24,7 @@ import (
 
 const (
 	listenPort                     = 8080
-	powerDNSSubdomainAddressEnvKey = "ISUCON13_POWERDNS_SUBDOMAIN_ADDRESS"
+	powerDNSSubdomainAddressEnvKey = "ISUCON13_POWERDNS_SUBDOMAIN_ADDRESS" // ONOE: isucon2のglobal ip
 )
 
 var (
@@ -35,7 +35,7 @@ var (
 
 func init() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-	if secretKey, ok := os.LookupEnv("ISUCON13_SESSION_SECRETKEY"); ok {
+	if secretKey, ok := os.LookupEnv("ISUCON13_SESSION_SECRETKEY"); ok { // ONOE: どこで指定されてる？
 		secret = []byte(secretKey)
 	}
 }
@@ -145,7 +145,7 @@ func main() {
 	// get livestream
 	e.GET("/api/livestream/:livestream_id", getLivestreamHandler)
 	// get polling livecomment timeline
-	e.GET("/api/livestream/:livestream_id/livecomment", getLivecommentsHandler)
+	e.GET("/api/livestream/:livestream_id/livecomment", getLivecommentsHandler) // ONOE: polling
 	// ライブコメント投稿
 	e.POST("/api/livestream/:livestream_id/livecomment", postLivecommentHandler)
 	e.POST("/api/livestream/:livestream_id/reaction", postReactionHandler)
