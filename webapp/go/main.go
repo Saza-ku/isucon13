@@ -5,10 +5,8 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"strconv"
@@ -18,11 +16,9 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/gorilla/sessions"
 	"github.com/labstack/echo-contrib/session"
-	echolog "github.com/labstack/gommon/log"
 )
 
 const (
@@ -46,7 +42,6 @@ type IconModel struct {
 }
 
 func init() {
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	if secretKey, ok := os.LookupEnv("ISUCON13_SESSION_SECRETKEY"); ok { // ONOE: どこで指定されてる？
 		secret = []byte(secretKey)
 	}
@@ -56,7 +51,7 @@ type InitializeResponse struct {
 	Language string `json:"language"`
 }
 
-func connectDB(logger echo.Logger) (*sqlx.DB, error) {
+func connectDB() (*sqlx.DB, error) {
 	const (
 		networkTypeEnvKey = "ISUCON13_MYSQL_DIALCONFIG_NET"
 		addrEnvKey        = "ISUCON13_MYSQL_DIALCONFIG_ADDRESS"
@@ -128,27 +123,18 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 }
 
 func initializeHandler(c echo.Context) error {
-	if out, err := exec.Command("../sql/init.sh").CombinedOutput(); err != nil {
-		c.Logger().Warnf("init.sh failed with err=%s", string(out))
+	if _, err := exec.Command("../sql/init.sh").CombinedOutput(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
 	if err := initializeUserIconPath(); err != nil {
-		c.Logger().Warnf("failed to initialize user icon path: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
 	err := mcConn.FlushAll()
 	if err != nil {
-		c.Logger().Errorf("mc FlushAll error : %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
-	go func() {
-		http.Post(fmt.Sprintf("http://192.168.0.11:%d/setup", 8080), "application/json", nil)
-		http.Post(fmt.Sprintf("http://192.168.0.12:%d/setup", 8080), "application/json", nil)
-		http.Post(fmt.Sprintf("http://192.168.0.13:%d/setup", 8080), "application/json", nil)
-	}()
 
 	c.Request().Header.Add("Content-Type", "application/json;charset=utf-8")
 	return c.JSON(http.StatusOK, InitializeResponse{
@@ -162,7 +148,6 @@ func initializeUserIconPath() error {
 		return err
 	}
 
-	log.Printf("icons len: %d", len(icons))
 	if len(icons) == 0 {
 		return nil
 	}
@@ -190,21 +175,11 @@ func initializeUserIconPath() error {
 }
 
 func main() {
-	// pprof
-	go func() {
-		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
-	}()
-
 	e := echo.New()
-	e.Debug = true
-	e.Logger.SetLevel(echolog.DEBUG)
-	e.Use(middleware.Logger())
 	cookieStore := sessions.NewCookieStore(secret)
 	cookieStore.Options.Domain = "*.u.isucon.dev"
 	e.Use(session.Middleware(cookieStore))
 	// e.Use(middleware.Recover())
-
-	e.POST("/setup", postSetup)
 
 	// 初期化
 	e.POST("/api/initialize", initializeHandler)
@@ -263,10 +238,9 @@ func main() {
 	e.HTTPErrorHandler = errorResponseHandler
 
 	// DB接続
-	conn, err := connectDB(e.Logger)
+	conn, err := connectDB()
 	if err != nil {
-		e.Logger.Errorf("failed to connect db: %v", err)
-		os.Exit(1)
+		panic(err)
 	}
 	defer conn.Close()
 	dbConn = conn
@@ -275,7 +249,6 @@ func main() {
 
 	subdomainAddr, ok := os.LookupEnv(powerDNSSubdomainAddressEnvKey)
 	if !ok {
-		e.Logger.Errorf("environ %s must be provided", powerDNSSubdomainAddressEnvKey)
 		os.Exit(1)
 	}
 	powerDNSSubdomainAddress = subdomainAddr
@@ -283,7 +256,6 @@ func main() {
 	// HTTPサーバ起動
 	listenAddr := net.JoinHostPort("", strconv.Itoa(listenPort))
 	if err := e.Start(listenAddr); err != nil {
-		e.Logger.Errorf("failed to start HTTP server: %v", err)
 		os.Exit(1)
 	}
 }
@@ -293,29 +265,12 @@ type ErrorResponse struct {
 }
 
 func errorResponseHandler(err error, c echo.Context) {
-	c.Logger().Errorf("error at %s: %+v", c.Path(), err)
 	if he, ok := err.(*echo.HTTPError); ok {
 		if e := c.JSON(he.Code, &ErrorResponse{Error: err.Error()}); e != nil {
-			c.Logger().Errorf("%+v", e)
 		}
 		return
 	}
 
 	if e := c.JSON(http.StatusInternalServerError, &ErrorResponse{Error: err.Error()}); e != nil {
-		c.Logger().Errorf("%+v", e)
 	}
-}
-
-func postSetup(c echo.Context) error {
-	go func() {
-		cmd := exec.Command("/home/isucon/scripts/measure.sh")
-		bytes, err := cmd.Output()
-		cmd.Stderr = os.Stderr
-		if err != nil {
-			c.Logger().Errorf("exec measure.sh error: %v", err)
-			c.Logger().Errorf("output: %v", string(bytes))
-		}
-	}()
-
-	return c.NoContent(http.StatusOK)
 }

@@ -107,11 +107,9 @@ func reserveLivestreamHandler(c echo.Context) error {
 	// NOTE: 並列な予約のoverbooking防止にFOR UPDATEが必要
 	var slots []*ReservationSlotModel
 	if err := tx.SelectContext(ctx, &slots, "SELECT * FROM reservation_slots WHERE start_at >= ? AND end_at <= ? FOR UPDATE", req.StartAt, req.EndAt); err != nil {
-		c.Logger().Warnf("予約枠一覧取得でエラー発生: %+v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get reservation_slots: "+err.Error())
 	}
 	for _, slot := range slots {
-		c.Logger().Infof("%d ~ %d予約枠の残数 = %d\n", slot.StartAt, slot.EndAt, slot.Slot)
 		if slot.Slot < 1 {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("予約期間 %d ~ %dに対して、予約区間 %d ~ %dが予約できません", termStartAt.Unix(), termEndAt.Unix(), req.StartAt, req.EndAt))
 		}
