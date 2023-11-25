@@ -103,14 +103,9 @@ func getLivecommentsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
 	}
 
-	livecomments := make([]Livecomment, len(livecommentModels))
-	for i := range livecommentModels {
-		livecomment, err := fillLivecommentResponse(ctx, tx, livecommentModels[i]) // N+1
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fil livecomments: "+err.Error())
-		}
-
-		livecomments[i] = livecomment
+	livecomments, err := getLivecommentsResponse(ctx, tx, livecommentModels, int64(livestreamID))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -401,6 +396,47 @@ func moderateHandler(c echo.Context) error {
 	})
 }
 
+func getLivecommentsResponse(ctx context.Context, tx *sqlx.Tx, livecommentModels []LivecommentModel, livestreamId int64) ([]Livecomment, error){
+	userMap := map[int64]User{}
+	for _, livecommentModel := range livecommentModels {
+		userMap[livecommentModel.UserID] = User{}
+	}
+	userIDs := make([]int64, len(userMap))
+	for userID := range userMap {
+		userIDs = append(userIDs, userID)
+	}
+	users, err := getUsersResponse(ctx, tx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+	
+	var livestreamModel LivestreamModel
+	if err := tx.GetContext(ctx, &livestreamModel, "SELECT * FROM livestreams WHERE id = ?", livestreamId); err != nil {
+		return nil, err
+	}
+	livestream, err := fillLivestreamResponse(ctx, tx, livestreamModel)
+	if err != nil {
+		return nil, err
+	}
+
+	livecomments := make([]Livecomment, len(livecommentModels))
+	for i, livecommentModel := range livecommentModels {
+		livecomments[i] = Livecomment{
+			ID:         livecommentModel.ID,
+			User:       userMap[livecommentModel.UserID],
+			Livestream: livestream,
+			Comment:    livecommentModel.Comment,
+			Tip:        livecommentModel.Tip,
+			CreatedAt:  livecommentModel.CreatedAt,
+		}
+	}
+	return livecomments, nil
+}
+
+// MORIRIN: 遅いが、ボトルネックではなさそう
 func fillLivecommentResponse(ctx context.Context, tx *sqlx.Tx, livecommentModel LivecommentModel) (Livecomment, error) {
 	commentOwnerModel := UserModel{}
 	if err := tx.GetContext(ctx, &commentOwnerModel, "SELECT * FROM users WHERE id = ?", livecommentModel.UserID); err != nil {
