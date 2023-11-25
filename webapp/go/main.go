@@ -26,6 +26,7 @@ import (
 const (
 	listenPort                     = 8080
 	powerDNSSubdomainAddressEnvKey = "ISUCON13_POWERDNS_SUBDOMAIN_ADDRESS" // ONOE: isucon2のglobal ip
+	iconDirPath                    = "/home/isucon/icons"
 )
 
 var (
@@ -33,6 +34,13 @@ var (
 	dbConn                   *sqlx.DB
 	secret                   = []byte("isucon13_session_cookiestore_defaultsecret")
 )
+
+type IconModel struct {
+	ID             int64  `db:"id"`
+	UserID         int64  `db:"user_id"`
+	IconPath       string `db:"icon_path"`
+	Image          []byte `db:"image"`
+}
 
 func init() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
@@ -114,6 +122,11 @@ func initializeHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
+	if err := initializeUserIconPath(); err != nil {
+		c.Logger().Warnf("failed to initialize user icon path: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
+	}
+
 	go func() {
 		http.Post(fmt.Sprintf("http://192.168.0.11:%d/setup", 8080), "application/json", nil)
 		http.Post(fmt.Sprintf("http://192.168.0.12:%d/setup", 8080), "application/json", nil)
@@ -124,6 +137,39 @@ func initializeHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, InitializeResponse{
 		Language: "golang",
 	})
+}
+
+func initializeUserIconPath() error {
+	var icons []*IconModel
+	if err := dbConn.Select(&icons, "SELECT id, user_id, image FROM icons"); err != nil {
+		return err
+	}
+
+	log.Printf("icons len: %d", len(icons))
+	if len(icons) == 0 {
+		return nil
+	}
+
+	for _, icon := range icons {
+		if icon.IconPath != "" {
+			continue
+		}
+		if len(icon.Image) == 0 {
+			icon.IconPath = fallbackImage
+			continue
+		}
+		icon.IconPath = fmt.Sprintf("%s/%d.jpeg", iconDirPath, icon.UserID)
+		err := os.WriteFile(icon.IconPath, icon.Image, 0644)
+		if err != nil {
+			return err
+		}
+		icon.Image = []byte{}
+	}
+
+	if _, err := dbConn.NamedExec("INSERT INTO icons (id, user_id, icon_path, image) VALUES (:id, :user_id, :icon_path, :image) ON DUPLICATE KEY UPDATE icon_path = VALUES(`icon_path`)", icons); err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {

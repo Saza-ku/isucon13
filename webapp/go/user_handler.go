@@ -36,6 +36,7 @@ type UserModel struct {
 	DisplayName    string `db:"display_name"`
 	Description    string `db:"description"`
 	HashedPassword string `db:"password"`
+	IconPath       string `db:"icon_path"`
 }
 
 type User struct {
@@ -45,6 +46,7 @@ type User struct {
 	Description string `json:"description,omitempty"`
 	Theme       Theme  `json:"theme,omitempty"`
 	IconHash    string `json:"icon_hash,omitempty"`
+	IconPath    string `json:"icon_path,omitempty"`
 }
 
 type Theme struct {
@@ -104,8 +106,8 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user: "+err.Error())
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", user.ID); err != nil {
+	var iconPath string
+	if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", user.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.File(fallbackImage)
 		} else {
@@ -113,7 +115,7 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 		}
 	}
 
-	return c.Blob(http.StatusOK, "image/jpeg", image)
+	return c.File(iconPath)
 }
 
 func postIconHandler(c echo.Context) error {
@@ -140,11 +142,16 @@ func postIconHandler(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
+	iconPath, err := saveImage(req.Image, userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save image: "+err.Error())
+	}
+
 	if _, err := tx.ExecContext(ctx, "DELETE FROM icons WHERE user_id = ?", userID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old user icon: "+err.Error())
 	}
 
-	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, image) VALUES (?, ?)", userID, req.Image)
+	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, icon_path, image) VALUES (?, ?, ?)", userID, iconPath, []byte{})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert new user icon: "+err.Error())
 	}
@@ -161,6 +168,15 @@ func postIconHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, &PostIconResponse{
 		ID: iconID,
 	})
+}
+
+func saveImage(image []byte, userID int64) (string, error) {
+	iconPath := fmt.Sprintf("%s/%d.jpeg", iconDirPath, userID)
+	err := os.WriteFile(iconPath, image, 0644)
+	if err != nil {
+		return "", err
+	}
+	return iconPath, nil
 }
 
 func getMeHandler(c echo.Context) error {
@@ -405,14 +421,16 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 	}
 
 	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", userModel.ID); err != nil {
+	var iconPath string
+	if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", userModel.ID); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return User{}, err
 		}
-		image, err = os.ReadFile(fallbackImage)
-		if err != nil {
-			return User{}, err
-		}
+		iconPath = fallbackImage
+	}
+	image, err := os.ReadFile(iconPath)
+	if err != nil {
+		return User{}, err
 	}
 	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
 
