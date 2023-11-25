@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"strconv"
@@ -181,11 +180,6 @@ func initializeUserIconPath() error {
 }
 
 func main() {
-	// pprof
-	go func() {
-		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
-	}()
-
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(echolog.DEBUG)
