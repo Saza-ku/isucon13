@@ -34,11 +34,11 @@
 #     src: /etc/sysctl.d
 #     dest: ../../../../etc
 
-# - name: Fetch etc/memcached.conf
-#   ansible.posix.synchronize:
-#     mode: pull
-#     src: /etc/memcached.conf
-#     dest: ../../../../etc
+- name: Fetch etc/memcached.conf
+  ansible.posix.synchronize:
+    mode: pull
+    src: /etc/memcached.conf
+    dest: ../../../../etc
 
 - name: Fetch env.sh
   ansible.posix.synchronize:

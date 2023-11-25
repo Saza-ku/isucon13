@@ -18,6 +18,8 @@ import (
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
+	"github.com/bradfitz/gomemcache/memcache"
+
 )
 
 const (
@@ -92,6 +94,17 @@ func getIconHandler(c echo.Context) error { // ONOE: fileに保存して304で�
 
 	username := c.Param("username")
 
+	expectIconHash := c.Request().Header.Get("If-None-Match")
+	if expectIconHash != "" {
+		actualItem, err := mcConn.Get(iconHashKey(username))
+		if err == nil {
+			actualIconHash := fmt.Sprintf("\"%s\"", string(actualItem.Value))
+			if expectIconHash == actualIconHash {
+				return c.NoContent(http.StatusNotModified)
+			}
+		}
+	}
+
 	tx, err := dbConn.BeginTxx(ctx, nil)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin transaction: "+err.Error())
@@ -145,6 +158,13 @@ func postIconHandler(c echo.Context) error {
 	iconPath, err := saveImage(req.Image, userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save image: "+err.Error())
+	}
+
+	username := sess.Values[defaultUsernameKey].(string)
+	if err := mcConn.Delete(iconHashKey(username)); err != nil {
+		if err != memcache.ErrCacheMiss {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete mc: "+err.Error())
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, "DELETE FROM icons WHERE user_id = ?", userID); err != nil {
@@ -504,19 +524,32 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		return User{}, err
 	}
 
-	var image []byte
-	var iconPath string
-	if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", userModel.ID); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
+	var iconHashStr string
+	item, err := mcConn.Get(iconHashKey(userModel.Name))
+	if err == nil {
+		iconHashStr = string(item.Value)
+	} else {
+		var image []byte
+		var iconPath string
+		if err := tx.GetContext(ctx, &iconPath, "SELECT icon_path FROM icons WHERE user_id = ?", userModel.ID); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return User{}, err
+			}
+			iconPath = fallbackImage
+		}
+		image, err := os.ReadFile(iconPath)
+		if err != nil {
 			return User{}, err
 		}
-		iconPath = fallbackImage
+		iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
+		iconHashStr = fmt.Sprintf("%x", iconHash)
+
+		mcConn.Set(&memcache.Item{
+			Key:        iconHashKey(userModel.Name),
+			Value:      []byte(iconHashStr),
+			Expiration: 0,
+		})
 	}
-	image, err := os.ReadFile(iconPath)
-	if err != nil {
-		return User{}, err
-	}
-	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
 
 	user := User{
 		ID:          userModel.ID,
@@ -527,8 +560,12 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
 		},
-		IconHash: fmt.Sprintf("%x", iconHash),
+		IconHash: iconHashStr,
 	}
 
 	return user, nil
+}
+
+func iconHashKey(userName string) string {
+	return fmt.Sprintf("iconhash_%s", userName)
 }
