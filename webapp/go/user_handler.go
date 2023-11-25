@@ -414,6 +414,90 @@ func verifyUserSession(c echo.Context) error {
 	return nil
 }
 
+type IconPathData struct {
+	UserID   int64  `db:"user_id"`
+	IconPath string `db:"icon_path"`
+}
+
+func getUsersResponse(ctx context.Context, tx *sqlx.Tx, ids []int64) ([]User, error){
+	var users []UserModel
+	var res []User
+	if len(ids) == 0 {
+		return res, nil
+	}
+
+	query, args, err := sqlx.In("SELECT * FROM users WHERE id IN (?)", ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.SelectContext(ctx, &users, query, args...); err != nil {
+		return nil, err
+	}
+	userId2index := make(map[int64]int)
+	res = make([]User, len(users))
+	for i, user := range users {
+		userId2index[user.ID] = i
+		res[i] = User{
+			ID:          user.ID,
+			Name:        user.Name,
+			DisplayName: user.DisplayName,
+			Description: user.Description,
+		}
+	}
+
+	var themes []ThemeModel
+	query, args, err = sqlx.In("SELECT * FROM themes WHERE user_id IN (?)", ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.SelectContext(ctx, &themes, query, args...); err != nil {
+		return nil, err
+	}
+	for _, theme := range themes {
+		idx, ok := userId2index[theme.UserID]
+		if !ok {
+			continue
+		}
+		res[idx].Theme = Theme{
+			ID:       theme.ID,
+			DarkMode: theme.DarkMode,
+		}
+	}
+	if len(themes) != len(users) {
+		return nil, errors.New("the number of themes is not equal to the number of users")
+	}
+	
+	var icons []IconPathData
+	query, args, err = sqlx.In("SELECT user_id, icon_path FROM icons WHERE user_id IN (?)", ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.SelectContext(ctx, &icons, query, args...); err != nil {
+		return nil, err
+	}
+	for _, icon := range icons {
+		idx, ok := userId2index[icon.UserID]
+		if !ok {
+			continue
+		}
+		res[idx].IconPath = icon.IconPath
+	}
+	for i, user := range res {
+		if user.IconPath == "" {
+			res[i].IconPath = fallbackImage
+		}
+	}
+	for i, user := range res {
+		image, err := os.ReadFile(user.IconPath)
+		if err != nil {
+			return nil, err
+		}
+		res[i].IconHash = fmt.Sprintf("%x", sha256.Sum256(image))
+	}
+
+	return res, nil
+}
+
 func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (User, error) {
 	themeModel := ThemeModel{}
 	if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
