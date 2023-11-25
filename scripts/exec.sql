@@ -10,5 +10,8 @@ RENAME USER 'isucon'@'localhost' to 'isucon'@'%';
 RENAME USER 'isudns'@'localhost' to 'isudns'@'%';
 */
 
+/* add index for SELECT * FROM livestream_tags WHERE livestream_id = N */
+ALTER TABLE `livestream_tags` ADD INDEX `livestream_id` (`livestream_id`);
+
 ALTER TABLE icons ADD icon_path VARCHAR(255) NOT NULL DEFAULT '../img/NoImage.jpg';
 -- ALTER TABLE icons DROP icon_path;
