@@ -4,6 +4,8 @@ reverse: true
 query_string: false
 output: "count,method,uri,min,max,sum,avg,p99"
 matching_groups:
+  - /api/livestream/search
+  - /api/livestream/reservation
   - /api/user/.+/theme
   - /api/user/.+/livestream
   - /api/livestream/.+/statistics
