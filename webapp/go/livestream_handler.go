@@ -481,6 +481,72 @@ func getLivecommentReportsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, reports)
 }
 
+type SearchTag struct{
+	LivestreamId int64 `db:"livestream_id"`
+	TagId int64 `db:"tag_id"`
+	TagName string `db:"tag_name"`
+}
+
+func fillLivestreamsResponse(ctx context.Context, tx *sqlx.Tx, livestreamModels []LivestreamModel) ([]Livestream, error) {
+	userMap := make(map[int64]User)
+	if len(livestreamModels) == 0 {
+		return []Livestream{}, nil
+	}
+	var livestreamIDs []int64
+	for _, livestreamModel := range livestreamModels {
+		livestreamIDs = append(livestreamIDs, livestreamModel.ID)
+		userMap[livestreamModel.UserID] = User{}
+	}
+	var userIDs []int64
+	for userID := range userMap {
+		userIDs = append(userIDs, userID)
+	}
+	users, err := getUsersResponse(ctx, tx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+
+	var livestreamTags []SearchTag
+	query, params, err := sqlx.In("SELECT livestream_id, tags.id AS tag_id, tags.name as tag_name  FROM livestream_tags as l LEFT JOIN tags ON l.tag_id = tags.id WHERE livestream_id IN (?)", livestreamIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.SelectContext(ctx, &livestreamTags, query, params...); err != nil {
+		return nil, err
+	}
+	tagsMap := make(map[int64][]Tag)
+	for _, tag := range livestreamTags {
+		tagsMap[tag.LivestreamId] = append(tagsMap[tag.LivestreamId], Tag{
+			ID:   tag.TagId,
+			Name: tag.TagName,
+		})
+	}
+	
+	var livestreams []Livestream
+	for _, livestreamModel := range livestreamModels {
+		tags, ok := tagsMap[livestreamModel.ID]
+		if !ok {
+			tags = []Tag{}
+		}
+		livestream := Livestream{
+			ID:           livestreamModel.ID,
+			Owner:        userMap[livestreamModel.UserID],
+			Title:        livestreamModel.Title,
+			Description:  livestreamModel.Description,
+			PlaylistUrl:  livestreamModel.PlaylistUrl,
+			ThumbnailUrl: livestreamModel.ThumbnailUrl,
+			Tags:         tags,
+			StartAt:      livestreamModel.StartAt,
+			EndAt:        livestreamModel.EndAt,
+		}
+		livestreams = append(livestreams, livestream)
+	}
+	return livestreams, nil
+}
+
 func fillLivestreamResponse(ctx context.Context, tx *sqlx.Tx, livestreamModel LivestreamModel) (Livestream, error) {
 	ownerModel := UserModel{}
 	if err := tx.GetContext(ctx, &ownerModel, "SELECT * FROM users WHERE id = ?", livestreamModel.UserID); err != nil {
@@ -491,23 +557,18 @@ func fillLivestreamResponse(ctx context.Context, tx *sqlx.Tx, livestreamModel Li
 		return Livestream{}, err
 	}
 
-	var livestreamTagModels []*LivestreamTagModel
-	if err := tx.SelectContext(ctx, &livestreamTagModels, "SELECT * FROM livestream_tags WHERE livestream_id = ?", livestreamModel.ID); err != nil {
+	var livestreamTags []SearchTag
+	if err := tx.SelectContext(ctx, &livestreamTags, "SELECT livestream_id, tags.id AS tag_id, tags.name as tag_name  FROM livestream_tags as l LEFT JOIN tags ON l.tag_id = tags.id WHERE livestream_id = ?", livestreamModel.ID); err != nil {
 		return Livestream{}, err
 	}
-
-	tags := make([]Tag, len(livestreamTagModels))
-	for i := range livestreamTagModels {
-		tagModel := TagModel{}
-		if err := tx.GetContext(ctx, &tagModel, "SELECT * FROM tags WHERE id = ?", livestreamTagModels[i].TagID); err != nil {
-			return Livestream{}, err
-		}
-
-		tags[i] = Tag{
-			ID:   tagModel.ID,
-			Name: tagModel.Name,
+tags := make([]Tag, len(livestreamTags))
+	for i, tag := range livestreamTags {
+				tags[i] = Tag{
+			ID:   tag.TagId,
+			Name: tag.TagName,
 		}
 	}
+
 
 	livestream := Livestream{
 		ID:           livestreamModel.ID,
