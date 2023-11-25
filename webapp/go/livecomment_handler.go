@@ -382,14 +382,16 @@ func moderateHandler(c echo.Context) error {
 			deleteIds = append(deleteIds, livecomment.ID)
 		}
 	}
-	query, args, err := sqlx.In("DELETE FROM livecomments WHERE id IN (?)", deleteIds)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "sql parse error:"+err.Error())
-	}
-	query = tx.Rebind(query)
-	_, err = tx.Exec(query, args...)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old livecomments that hit spams: "+err.Error())
+	if len(deleteIds) > 0 {
+		query, args, err := sqlx.In("DELETE FROM livecomments WHERE id IN (?)", deleteIds)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "sql parse error:"+err.Error())
+		}
+		query = tx.Rebind(query)
+		_, err = tx.Exec(query, args...)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old livecomments that hit spams: "+err.Error())
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
