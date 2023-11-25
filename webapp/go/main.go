@@ -26,7 +26,7 @@ import (
 const (
 	listenPort                     = 8080
 	powerDNSSubdomainAddressEnvKey = "ISUCON13_POWERDNS_SUBDOMAIN_ADDRESS" // ONOE: isucon2のglobal ip
-	iconDirPath                    = "/home/isucon/icons"
+	iconDirPath                    = "/home/isucon/icons/api/user"
 )
 
 var (
