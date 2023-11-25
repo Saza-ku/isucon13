@@ -66,14 +66,9 @@ func getReactionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "failed to get reactions")
 	}
 
-	reactions := make([]Reaction, len(reactionModels))
-	for i := range reactionModels { // ONOE: N+1
-		reaction, err := fillReactionResponse(ctx, tx, reactionModels[i])
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill reaction: "+err.Error())
-		}
-
-		reactions[i] = reaction
+	reactions, err := getReactionsResponse(ctx, tx, reactionModels, int64(livestreamID))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill reaction: "+err.Error())
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -142,6 +137,46 @@ func postReactionHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, reaction)
 }
 
+func getReactionsResponse(ctx context.Context, tx *sqlx.Tx, reactionModels []ReactionModel, livestreamId int64) ([]Reaction, error) {
+	userMap := make(map[int64]User)
+	for _, reactionModel := range reactionModels {
+		userMap[reactionModel.UserID] = User{}
+	}
+	userIDs := make([]int64, 0, len(userMap))
+	for userID := range userMap {
+		userIDs = append(userIDs, userID)
+	}
+	users, err := getUsersResponse(ctx, tx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+
+	livestreamModel := LivestreamModel{}
+	if err := tx.GetContext(ctx, &livestreamModel, "SELECT * FROM livestreams WHERE id = ?", livestreamId); err != nil {
+		return nil, err
+	}
+	livestream, err := fillLivestreamResponse(ctx, tx, livestreamModel)
+	if err != nil {
+		return nil, err
+	}
+	
+	reactions := make([]Reaction, len(reactionModels))
+	for i, reactionModel := range reactionModels {
+		reactions[i] = Reaction{
+			ID:         reactionModel.ID,
+			EmojiName:  reactionModel.EmojiName,
+			User:       userMap[reactionModel.UserID],
+			Livestream: livestream,
+			CreatedAt:  reactionModel.CreatedAt,
+		}
+	}
+	return reactions, nil	
+}
+
+// MORIRIN: 遅いが、ボトルネックではなさそう
 func fillReactionResponse(ctx context.Context, tx *sqlx.Tx, reactionModel ReactionModel) (Reaction, error) {
 	userModel := UserModel{}
 	if err := tx.GetContext(ctx, &userModel, "SELECT * FROM users WHERE id = ?", reactionModel.UserID); err != nil {
