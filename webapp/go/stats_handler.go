@@ -199,6 +199,12 @@ func getUserStatisticsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, stats)
 }
 
+type RankCount struct {
+	Id int64 `db:"id"`
+	Count int64 `db:"count"`
+}
+
+
 func getLivestreamStatisticsHandler(c echo.Context) error {
 	ctx := c.Request().Context()
 
@@ -234,23 +240,30 @@ func getLivestreamStatisticsHandler(c echo.Context) error {
 
 	// ランク算出
 	var ranking LivestreamRanking
+	var reactions []RankCount
+	if err := tx.GetContext(ctx, &reactions, "SELECT l.id AS id, COUNT(*) AS count FROM livestreams l INNER JOIN reactions r ON l.id = r.livestream_id GROUP BY l.id"); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count reactions: "+err.Error())
+	}
+	var totalTips []RankCount
+	if err := tx.GetContext(ctx, &totalTips, "SELECT l.id AS id, IFNULL(SUM(l2.tip), 0) AS count FROM livestreams l INNER JOIN livecomments l2 ON l.id = l2.livestream_id GROUP BY l.id"); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count tips: "+err.Error())
+	}
+
+	rankTmp := make(map[int64]int64)
+	for _, reaction := range reactions {
+		rankTmp[reaction.Id] += reaction.Count
+	}
+	for _, tip := range totalTips {
+		rankTmp[tip.Id] += tip.Count
+	}
 	for _, livestream := range livestreams {
-		var reactions int64
-		if err := tx.GetContext(ctx, &reactions, "SELECT COUNT(*) FROM livestreams l INNER JOIN reactions r ON l.id = r.livestream_id WHERE l.id = ?", livestream.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to count reactions: "+err.Error())
-		}
-
-		var totalTips int64
-		if err := tx.GetContext(ctx, &totalTips, "SELECT IFNULL(SUM(l2.tip), 0) FROM livestreams l INNER JOIN livecomments l2 ON l.id = l2.livestream_id WHERE l.id = ?", livestream.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to count tips: "+err.Error())
-		}
-
-		score := reactions + totalTips
+		score := rankTmp[livestream.ID]
 		ranking = append(ranking, LivestreamRankingEntry{
 			LivestreamID: livestream.ID,
 			Score:        score,
 		})
 	}
+
 	sort.Sort(ranking)
 
 	var rank int64 = 1
