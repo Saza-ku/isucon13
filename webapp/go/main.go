@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -16,11 +15,9 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/gorilla/sessions"
 	"github.com/labstack/echo-contrib/session"
-	echolog "github.com/labstack/gommon/log"
 )
 
 const (
@@ -44,7 +41,6 @@ type IconModel struct {
 }
 
 func init() {
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	if secretKey, ok := os.LookupEnv("ISUCON13_SESSION_SECRETKEY"); ok { // ONOE: どこで指定されてる？
 		secret = []byte(secretKey)
 	}
@@ -118,19 +114,16 @@ func connectDB(logger echo.Logger) (*sqlx.DB, error) {
 }
 
 func initializeHandler(c echo.Context) error {
-	if out, err := exec.Command("../sql/init.sh").CombinedOutput(); err != nil {
-		c.Logger().Warnf("init.sh failed with err=%s", string(out))
+	if _, err := exec.Command("../sql/init.sh").CombinedOutput(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
 	if err := initializeUserIconPath(); err != nil {
-		c.Logger().Warnf("failed to initialize user icon path: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
 	err := mcConn.FlushAll()
 	if err != nil {
-		c.Logger().Errorf("mc FlushAll error : %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -152,7 +145,6 @@ func initializeUserIconPath() error {
 		return err
 	}
 
-	log.Printf("icons len: %d", len(icons))
 	if len(icons) == 0 {
 		return nil
 	}
@@ -181,9 +173,6 @@ func initializeUserIconPath() error {
 
 func main() {
 	e := echo.New()
-	e.Debug = true
-	e.Logger.SetLevel(echolog.DEBUG)
-	e.Use(middleware.Logger())
 	cookieStore := sessions.NewCookieStore(secret)
 	cookieStore.Options.Domain = "*.u.isucon.dev"
 	e.Use(session.Middleware(cookieStore))
@@ -278,16 +267,13 @@ type ErrorResponse struct {
 }
 
 func errorResponseHandler(err error, c echo.Context) {
-	c.Logger().Errorf("error at %s: %+v", c.Path(), err)
 	if he, ok := err.(*echo.HTTPError); ok {
 		if e := c.JSON(he.Code, &ErrorResponse{Error: err.Error()}); e != nil {
-			c.Logger().Errorf("%+v", e)
 		}
 		return
 	}
 
 	if e := c.JSON(http.StatusInternalServerError, &ErrorResponse{Error: err.Error()}); e != nil {
-		c.Logger().Errorf("%+v", e)
 	}
 }
 
