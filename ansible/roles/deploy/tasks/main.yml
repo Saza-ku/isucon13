@@ -60,11 +60,11 @@
 #     dest: /etc/sysctl.d
 #     mode: push
 
-# - name: Deploy etc/memcached.conf
-#   ansible.posix.synchronize:
-#     src: ../../../../etc/memcached.conf
-#     dest: /etc/memcached.conf
-#     mode: push
+- name: Deploy etc/memcached.conf
+  ansible.posix.synchronize:
+    src: ../../../../etc/memcached.conf
+    dest: /etc/memcached.conf
+    mode: push
 
 - name: Deploy scripts
   ansible.posix.synchronize:
@@ -179,9 +179,9 @@
     state: restarted
     daemon_reload: yes
 
-# - name: Restart memcached
-#   become: true
-#   systemd:
-#     name: memcached.service
-#     state: restarted
-#     daemon_reload: yes
+- name: Restart memcached
+  become: true
+  systemd:
+    name: memcached.service
+    state: restarted
+    daemon_reload: yes
