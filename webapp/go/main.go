@@ -40,6 +40,7 @@ type IconModel struct {
 	UserID         int64  `db:"user_id"`
 	IconPath       string `db:"icon_path"`
 	Image          []byte `db:"image"`
+	UserName       string `db:"username"`
 }
 
 func init() {
@@ -141,7 +142,7 @@ func initializeHandler(c echo.Context) error {
 
 func initializeUserIconPath() error {
 	var icons []*IconModel
-	if err := dbConn.Select(&icons, "SELECT id, user_id, image FROM icons"); err != nil {
+	if err := dbConn.Select(&icons, "SELECT icons.id AS id, icons.user_id AS user_id, icons.image AS image, users.name AS username FROM icons JOIN users ON users.id = icons.user_id"); err != nil {
 		return err
 	}
 
@@ -158,7 +159,7 @@ func initializeUserIconPath() error {
 			icon.IconPath = fallbackImage
 			continue
 		}
-		icon.IconPath = fmt.Sprintf("%s/%d.jpeg", iconDirPath, icon.UserID)
+		icon.IconPath = fmt.Sprintf("%s/%s/icon", iconDirPath, icon.UserName)
 		err := os.WriteFile(icon.IconPath, icon.Image, 0644)
 		if err != nil {
 			return err

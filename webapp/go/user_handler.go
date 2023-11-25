@@ -142,7 +142,8 @@ func postIconHandler(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	iconPath, err := saveImage(req.Image, userID)
+	userName := sess.Values[defaultUsernameKey].(string)
+	iconPath, err := saveImage(req.Image, userName)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save image: "+err.Error())
 	}
@@ -170,8 +171,8 @@ func postIconHandler(c echo.Context) error {
 	})
 }
 
-func saveImage(image []byte, userID int64) (string, error) {
-	iconPath := fmt.Sprintf("%s/%d.jpeg", iconDirPath, userID)
+func saveImage(image []byte, userName string) (string, error) {
+	iconPath := fmt.Sprintf("%s/%s/icon", iconDirPath, userName)
 	err := os.WriteFile(iconPath, image, 0644)
 	if err != nil {
 		return "", err
@@ -432,8 +433,17 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 	if err != nil {
 		return User{}, err
 	}
-	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
 
+	var iconHashStr string
+	stat, err := os.Stat(iconPath)
+	if err != nil {
+		iconHash := sha256.Sum256(image)
+		iconHashStr = fmt.Sprintf("%x", iconHash)
+	} else {
+		modTime := stat.ModTime().Unix()
+		length := len(image)
+		iconHashStr = fmt.Sprintf("\"%x-%x\"", modTime, length)
+	}
 	user := User{
 		ID:          userModel.ID,
 		Name:        userModel.Name,
@@ -443,8 +453,10 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
 		},
-		IconHash: fmt.Sprintf("%x", iconHash),
+		IconHash: iconHashStr,
 	}
+
+	fmt.Printf("iconPath: %s iconHashStr: %s\n", iconPath, iconHashStr)
 
 	return user, nil
 }
