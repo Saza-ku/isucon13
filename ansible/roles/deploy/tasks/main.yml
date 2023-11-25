@@ -9,7 +9,7 @@
 
 - name: Deploy powerdns config
   ansible.posix.synchronize:
-    src: ../../../../etc/powerdns
+    src: ../../../../etc/powerdns/
     dest: /etc/powerdns
     mode: push
     delete: false
