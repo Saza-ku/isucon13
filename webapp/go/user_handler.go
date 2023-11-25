@@ -36,6 +36,7 @@ type UserModel struct {
 	DisplayName    string `db:"display_name"`
 	Description    string `db:"description"`
 	HashedPassword string `db:"password"`
+	Theme          ThemeModel  `db:"themes"`
 }
 
 type User struct {
@@ -424,6 +425,34 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		Theme: Theme{
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
+		},
+		IconHash: fmt.Sprintf("%x", iconHash),
+	}
+
+	return user, nil
+}
+
+func fillUserResponseOnlyIcon(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (User, error) {
+	var image []byte
+	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", userModel.ID); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return User{}, err
+		}
+		image, err = os.ReadFile(fallbackImage)
+		if err != nil {
+			return User{}, err
+		}
+	}
+	iconHash := sha256.Sum256(image) // ONOE: この値をもとにGetIconHandlerで304を返す
+
+	user := User{
+		ID:          userModel.ID,
+		Name:        userModel.Name,
+		DisplayName: userModel.DisplayName,
+		Description: userModel.Description,
+		Theme: Theme{
+			ID:       userModel.Theme.ID,
+			DarkMode: userModel.Theme.DarkMode,
 		},
 		IconHash: fmt.Sprintf("%x", iconHash),
 	}
