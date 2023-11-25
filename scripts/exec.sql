@@ -18,4 +18,7 @@ RENAME USER 'isudns'@'localhost' to 'isudns'@'%';
 
 -- ALTER TABLE `ng_words` ADD INDEX `ng_words_user_livestream_index` (`user_id`,`livestream_id`);
 
-ALTER TABLE `livecomments` ADD INDEX `livestream_id_created_idx` (`livestream_id`, `created_at`);
+ALTER TABLE `livecomments` DROP INDEX `livestream_id_created_idx`;
+ALTER TABLE `livecomments` ADD INDEX `comm_livestream_id_created_idx` (`livestream_id` ASC, `created_at` DESC);
+
+ALTER TABLE `reactions` ADD INDEX `react_livestream_id_created_idx` (`livestream_id` ASC, `created_at` DESC);
