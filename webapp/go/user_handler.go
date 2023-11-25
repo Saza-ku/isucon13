@@ -507,14 +507,32 @@ func getUsersResponse(ctx context.Context, tx *sqlx.Tx, ids []int64) ([]User, er
 			res[i].IconPath = fallbackImage
 		}
 	}
-	for i, user := range res {
-		image, err := os.ReadFile(user.IconPath)
-		if err != nil {
-			return nil, err
-		}
-		res[i].IconHash = fmt.Sprintf("%x", sha256.Sum256(image))
-	}
 
+	iconHashKeys := make([]string, len(res))
+	for i, user := range res {
+		iconHashKeys[i] = iconHashKey(user.Name)
+	}
+	items, err := mcConn.GetMulti(iconHashKeys)
+	if err != nil {
+		for i, user := range res {
+			image, err := os.ReadFile(user.IconPath)
+			if err != nil {
+				return nil, err
+			}
+			res[i].IconHash = fmt.Sprintf("%x", sha256.Sum256(image))
+		}
+	}
+	for i, user := range res {
+		if item, ok := items[iconHashKey(user.Name)]; ok {
+			res[i].IconHash = string(item.Value)
+		} else {
+			image, err := os.ReadFile(user.IconPath)
+			if err != nil {
+				return nil, err
+			}
+			res[i].IconHash = fmt.Sprintf("%x", sha256.Sum256(image))
+		}
+	}
 	return res, nil
 }
 
